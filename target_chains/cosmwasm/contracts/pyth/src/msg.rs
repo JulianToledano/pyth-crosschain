@@ -21,6 +21,22 @@ pub struct InstantiateMsg {
     pub fee: Coin,
 }
 
+/// TEST MODE ONLY: Test price data for direct price injection
 #[derive(Eq)]
 #[cw_serde]
-pub struct MigrateMsg {}
+pub struct TestPrice {
+    pub price_id: String,  // hex string (64 chars)
+    pub price: i64,
+    pub conf: u64,
+    pub expo: i32,
+    pub ema_price: i64,
+    pub ema_conf: u64,
+}
+
+#[derive(Eq)]
+#[cw_serde]
+pub struct MigrateMsg {
+    /// TEST MODE ONLY: Set a test price directly without VAA verification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_price: Option<TestPrice>,
+}

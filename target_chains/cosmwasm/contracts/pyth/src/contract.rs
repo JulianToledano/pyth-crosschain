@@ -60,9 +60,43 @@ const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// this function can safely be implemented as:
 /// `Ok(Response::default())`
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+pub fn migrate(deps: DepsMut, env: Env, msg: MigrateMsg) -> StdResult<Response> {
     // a new contract version should be set everytime a contract is migrated
     set_contract_version(deps.storage, &String::from(CONTRACT_VERSION))?;
+    
+    // TEST MODE: Handle test price setting via migrate
+    // This allows direct price injection without Wormhole VAA verification
+    if let Some(test_price) = msg.test_price {
+        use crate::msg::TestPrice;
+        let TestPrice { price_id, price, conf, expo, ema_price, ema_conf } = test_price;
+        
+        let id = PriceIdentifier::from_hex(&price_id)
+            .map_err(|_| cosmwasm_std::StdError::generic_err("Invalid price_id hex"))?;
+        
+        let price_feed = PriceFeed::new(
+            Identifier::new(id.to_bytes()),
+            Price {
+                price,
+                conf,
+                expo,
+                publish_time: env.block.time.seconds() as UnixTimestamp,
+            },
+            Price {
+                price: ema_price,
+                conf: ema_conf,
+                expo,
+                publish_time: env.block.time.seconds() as UnixTimestamp,
+            },
+        );
+        
+        let mut bucket = price_feed_bucket(deps.storage);
+        bucket.save(id.to_bytes().as_ref(), &price_feed)?;
+        
+        return Ok(Response::default()
+            .add_attribute("action", "set_test_price")
+            .add_attribute("price_id", price_id));
+    }
+    
     Ok(Response::default().add_attribute("Contract Version", CONTRACT_VERSION))
 }
 
@@ -122,6 +156,7 @@ pub fn execute(
         }
     }
 }
+
 
 #[cfg(not(feature = "osmosis"))]
 fn is_fee_sufficient(deps: &Deps, info: MessageInfo, data: &[Binary]) -> StdResult<bool> {
@@ -398,7 +433,7 @@ fn upgrade_contract(address: &Addr, new_code_id: u64) -> StdResult<Response<MsgW
         .add_message(CosmosMsg::Wasm(WasmMsg::Migrate {
             contract_addr: address.to_string(),
             new_code_id,
-            msg: to_binary(&MigrateMsg {})?,
+            msg: to_binary(&MigrateMsg { test_price: None })?,
         }))
         .add_attribute("action", "upgrade_contract")
         .add_attribute("new_code_id", format!("{new_code_id}")))
